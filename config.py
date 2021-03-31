@@ -75,7 +75,7 @@ misc_arg.add_argument('--save_sec', type=int, default=900)
 misc_arg.add_argument('--log_dir', type=str, default='log')
 misc_arg.add_argument('--tag', type=str, default='test')
 misc_arg.add_argument('--random_seed', type=int, default=123)
-
+misc_arg.add_argument('--file_path', type=str, default='')
 
 def get_config():
     config, unparsed = parser.parse_known_args()

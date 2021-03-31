@@ -121,7 +121,7 @@ class Tester(object):
         if self.mp:
             q = multiprocessing.JoinableQueue()
             pool = multiprocessing.Pool(self.num_worker, vectorize_mp, (q,))
-        file_path = "047584.png"
+        file_path = self.config.file_path
         param = self.predict(file_path)
         if self.mp:
             q.put(param)
