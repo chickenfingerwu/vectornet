@@ -6,7 +6,6 @@
 *.db
 *.opendb
 *.user
-log/
 data/
 potrace/
 gco/build
