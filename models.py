@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+
 from ops import *
 slim = tf.contrib.slim
 
@@ -36,10 +37,10 @@ def main(_):
         repeat_num = 20
         use_norm = True
         y = VDSR(x, hidden_num, repeat_num, data_format, use_norm)
-    else:
-        hidden_num = 128 # 128
-        repeat_num = 16 # 16
-        y = EDSR(x, hidden_num, repeat_num, data_format)    
+    # else:
+    #     hidden_num = 128 # 128
+    #     repeat_num = 16 # 16
+    #     # y = EDSR(x, hidden_num, repeat_num, data_format)
     show_all_variables()
 
 if __name__ == '__main__':

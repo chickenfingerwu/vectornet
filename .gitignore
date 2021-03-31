@@ -10,3 +10,5 @@ log/
 data/
 potrace/
 gco/build
+/.idea/
+/venv/
