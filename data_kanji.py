@@ -170,7 +170,7 @@ class BatchManager(object):
         s = np.array(img)[:, :, 2].astype(np.float)  # / 255.0
         max_intensity = np.amax(s)
         s = s / max_intensity
-        return s, [], []
+        return s, 3, []
 
     def read_svg(self, file_path):
         with open(file_path, 'r', encoding='utf-8') as f:

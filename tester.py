@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import imageio
 import os
 from tqdm import trange
 import multiprocessing
@@ -611,80 +612,80 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
     label_map = np.ones([pm.height, pm.width, 3], dtype=np.float)
     label_map_t = np.ones([pm.height, pm.width, 3], dtype=np.float)
     first_svg = True
-    # target_svg_path = os.path.join(pm.model_dir, '%s_%d_%d_%.2f.svg' % (file_name, num_labels, gt_labels, acc_avg))
-    # for color_id, i in enumerate(unique_labels):
-    #     i_label_list = np.nonzero(labels == i)
-    #
-    #     # handle duplicated pixels
-    #     for j, i_label in enumerate(i_label_list[0]):
-    #         if i_label >= num_path_pixels:
-    #             i_label_list[0][j] = pm.dup_rev_dict[i_label]
-    #
-    #     color = np.asarray(cscalarmap.to_rgba(color_id))
-    #     label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = color[:3]
-    #
-    #     # save i label map
-    #     i_label_map = np.zeros([pm.height, pm.width], dtype=np.float)
-    #     i_label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = pm.img[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]]
-    #     _, num_cc = skimage.measure.label(i_label_map, background=0, return_num=True)
-    #     i_label_map_path = os.path.join(pm.model_dir, 'tmp', 'i_%s_%d_%d.bmp' % (file_name, i, num_cc))
-    #     plt.imsave(i_label_map_path, i_label_map)
-    #
-    #     i_label_map = np.ones([pm.height, pm.width, 3], dtype=np.float)
-    #     i_label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = color[:3]
-    #     label_map_t += i_label_map
-    #
-    #     # vectorize using potrace
-    #     color *= 255
-    #     color_hex = '#%02x%02x%02x' % (int(color[0]), int(color[1]), int(color[2]))
-    #
-    #     if sys_name == 'Windows':
-    #         potrace_path = os.path.join('potrace', 'potrace.exe')
-    #         call([potrace_path, '-s', '-i', '-C'+color_hex, i_label_map_path])
-    #     else:
-    #         call(['potrace', '-s', '-i', '-C'+color_hex, i_label_map_path])
-    #
-    #     i_label_map_svg = os.path.join(pm.model_dir, 'tmp', 'i_%s_%d_%d.svg' % (file_name, i, num_cc))
-    #     # if first_svg:
-    #     #     copyfile(i_label_map_svg, target_svg_path)
-    #     #     first_svg = False
-    #     # else:
-    #     #     with open(target_svg_path, 'r') as f:
-    #     #         target_svg = f.read()
-    #     #
-    #     #     with open(i_label_map_svg, 'r') as f:
-    #     #         source_svg = f.read()
-    #     #
-    #     #     path_start = source_svg.find('<g')
-    #     #     path_end = source_svg.find('</svg>')
-    #     #
-    #     #     insert_pos = target_svg.find('</svg>')
-    #     #     target_svg = target_svg[:insert_pos] + source_svg[path_start:path_end] + target_svg[insert_pos:]
-    #     #
-    #     #     with open(target_svg_path, 'w') as f:
-    #     #         f.write(target_svg)
-    #
-    #     # remove i label map
-    #     os.remove(i_label_map_path)
-    #     os.remove(i_label_map_svg)
+    target_svg_path = os.path.join(pm.model_dir, '%s_%d_%d.svg' % (file_name, num_labels, gt_labels))
+    for color_id, i in enumerate(unique_labels):
+        i_label_list = np.nonzero(labels == i)
+
+        # handle duplicated pixels
+        for j, i_label in enumerate(i_label_list[0]):
+            if i_label >= num_path_pixels:
+                i_label_list[0][j] = pm.dup_rev_dict[i_label]
+
+        color = np.asarray(cscalarmap.to_rgba(color_id))
+        label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = color[:3]
+
+        # save i label map
+        i_label_map = np.zeros([pm.height, pm.width], dtype=np.float)
+        i_label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = pm.img[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]]
+        _, num_cc = skimage.measure.label(i_label_map, background=0, return_num=True)
+        i_label_map_path = os.path.join(pm.model_dir, 'tmp', 'i_%s_%d_%d.bmp' % (file_name, i, num_cc))
+        imageio.imwrite(i_label_map_path, i_label_map)
+
+        i_label_map = np.ones([pm.height, pm.width, 3], dtype=np.float)
+        i_label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = color[:3]
+        label_map_t += i_label_map
+
+        # vectorize using potrace
+        color *= 255
+        color_hex = '#%02x%02x%02x' % (int(color[0]), int(color[1]), int(color[2]))
+
+        if sys_name == 'Windows':
+            potrace_path = os.path.join('potrace', 'potrace.exe')
+            call([potrace_path, '-s', '-i', '-C'+color_hex, i_label_map_path])
+        else:
+            call(['potrace', '-s', '-i', '-C'+color_hex, i_label_map_path])
+
+        i_label_map_svg = os.path.join(pm.model_dir, 'tmp', 'i_%s_%d_%d.svg' % (file_name, i, num_cc))
+        if first_svg:
+            copyfile(i_label_map_svg, target_svg_path)
+            first_svg = False
+        else:
+            with open(target_svg_path, 'r') as f:
+                target_svg = f.read()
+
+            with open(i_label_map_svg, 'r') as f:
+                source_svg = f.read()
+
+            path_start = source_svg.find('<g')
+            path_end = source_svg.find('</svg>')
+
+            insert_pos = target_svg.find('</svg>')
+            target_svg = target_svg[:insert_pos] + source_svg[path_start:path_end] + target_svg[insert_pos:]
+
+            with open(target_svg_path, 'w') as f:
+                f.write(target_svg)
+
+        # remove i label map
+        os.remove(i_label_map_path)
+        os.remove(i_label_map_svg)
 
     # set opacity 0.5 to see overlaps
-    # with open(target_svg_path, 'r') as f:
-    #     target_svg = f.read()
-    #
-    # insert_pos = target_svg.find('<g')
-    # target_svg = target_svg[:insert_pos] + '<g fill-opacity="0.5">' + target_svg[insert_pos:]
-    # insert_pos = target_svg.find('</svg>')
-    # target_svg = target_svg[:insert_pos] + '</g>' + target_svg[insert_pos:]
-    #
-    # with open(target_svg_path, 'w') as f:
-    #     f.write(target_svg)
+    with open(target_svg_path, 'r') as f:
+        target_svg = f.read()
+
+    insert_pos = target_svg.find('<g')
+    target_svg = target_svg[:insert_pos] + '<g fill-opacity="0.5">' + target_svg[insert_pos:]
+    insert_pos = target_svg.find('</svg>')
+    target_svg = target_svg[:insert_pos] + '</g>' + target_svg[insert_pos:]
+
+    with open(target_svg_path, 'w') as f:
+        f.write(target_svg)
 
     label_map_path = os.path.join(pm.model_dir, '%s_%.2f_%.2f_%d_%d.png' % (
         file_name, pm.sigma_neighbor, pm.sigma_predict, num_labels, gt_labels))
-    plt.imsave(label_map_path, label_map)
+    imageio.imwrite(label_map_path, label_map)
 
     label_map_t /= np.amax(label_map_t)
     label_map_path = os.path.join(pm.model_dir, '%s_%.2f_%.2f_%d_%d_t.png' % (
         file_name, pm.sigma_neighbor, pm.sigma_predict, num_labels, gt_labels))
-    plt.imsave(label_map_path, label_map_t)
+    imageio.imwrite(label_map_path, label_map_t)
