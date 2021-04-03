@@ -2,7 +2,6 @@ from __future__ import print_function
 
 import imageio
 import os
-from tqdm import trange
 import multiprocessing
 import time
 from datetime import datetime
@@ -10,14 +9,12 @@ import platform
 from subprocess import call
 from shutil import copyfile
 
-import numpy as np
 import sklearn.neighbors
 import skimage.measure
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
-import scipy.misc
 
 from models import *
 from utils import save_image
@@ -130,17 +127,17 @@ class Tester(object):
             vectorize(param)
 
         # preprocess first
-        # for i in trange(self.num_test):
+        # for i in range(self.num_test):
         #     file_path = self.test_paths[i]
         #     print('\n[{}/{}] start prediction, path: {}'.format(i+1,self.num_test,file_path))
-
+        #
         #     param = self.predict(file_path)
-
+        #
         #     if self.mp:
         #         q.put(param)
         #     else:
         #         vectorize(param)
-
+        #
         if self.mp:
             q.join()
             pool.terminate()
@@ -150,7 +147,7 @@ class Tester(object):
 
     def predict(self, file_path):
         # convert svg to raster image
-        img, num_paths, path_list = self.batch_manager.read_png(file_path)
+        img, num_paths, path_list = self.batch_manager.read_svg(file_path)
         file_name = os.path.splitext(os.path.basename(file_path))[0]
         input_img_path = os.path.join(self.model_dir, '%s_0_input.png' % file_name)
         save_image((1 - img[np.newaxis, :, :, np.newaxis]) * 255, input_img_path, padding=0)
@@ -419,18 +416,16 @@ def vectorize(pm):
     # labels = label_cc(labels, pm)
 
     # 3. compute accuracy
-    # accuracy_list = compute_accuracy(labels, pm)
+    accuracy_list = compute_accuracy(labels, pm)
 
     unique_labels = np.unique(labels)
     num_labels = unique_labels.size
-    print(num_labels)
-    # acc_avg = np.average(accuracy_list)
-    # acc_avg = 0
-    #
-    # print('%s: %s, the number of labels %d, truth %d' % (datetime.now(), file_name, num_labels, pm.num_paths))
-    # print('%s: %s, energy before optimization %.4f' % (datetime.now(), file_name, e_before))
-    # print('%s: %s, energy after optimization %.4f' % (datetime.now(), file_name, e_after))
-    # print('%s: %s, accuracy computed, avg.: %.3f' % (datetime.now(), file_name, acc_avg))
+    acc_avg = np.average(accuracy_list)
+
+    print('%s: %s, the number of labels %d, truth %d' % (datetime.now(), file_name, num_labels, pm.num_paths))
+    print('%s: %s, energy before optimization %.4f' % (datetime.now(), file_name, e_before))
+    print('%s: %s, energy after optimization %.4f' % (datetime.now(), file_name, e_after))
+    print('%s: %s, accuracy computed, avg.: %.3f' % (datetime.now(), file_name, acc_avg))
 
     # 4. save image
     save_label_img(labels, unique_labels, num_labels, 0, pm)
@@ -438,14 +433,14 @@ def vectorize(pm):
     pm.duration_vect = duration
 
     # write result
-    # pm.duration += duration
-    # print('%s: %s, done (%.3f sec)' % (datetime.now(), file_name, pm.duration))
-    # stat_file_path = os.path.join(pm.model_dir, file_name + '_stat.txt')
-    # with open(stat_file_path, 'w') as f:
-    #     f.write('%s %d %d %.3f %.3f %.3f %.3f %.3f %.3f\n' % (
-    #         file_path, num_labels, pm.num_paths, acc_avg,
-    #         pm.duration_pred, pm.duration_ov, pm.duration_map,
-    #         pm.duration_vect, pm.duration))
+    pm.duration += duration
+    print('%s: %s, done (%.3f sec)' % (datetime.now(), file_name, pm.duration))
+    stat_file_path = os.path.join(pm.model_dir, file_name + '_stat.txt')
+    with open(stat_file_path, 'w') as f:
+        f.write('%s %d %d %.3f %.3f %.3f %.3f %.3f %.3f\n' % (
+            file_path, num_labels, pm.num_paths, acc_avg,
+            pm.duration_pred, pm.duration_ov, pm.duration_map,
+            pm.duration_vect, pm.duration))
 
 
 def label(file_name, pm):
@@ -562,7 +557,6 @@ def label_cc(labels, pm):
 def compute_accuracy(labels, pm):
     unique_labels = np.unique(labels)
     num_path_pixels = len(pm.path_pixels[0])
-
     acc_id_list = []
     acc_list = []
     for i in unique_labels:
@@ -613,6 +607,7 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
     label_map_t = np.ones([pm.height, pm.width, 3], dtype=np.float)
     first_svg = True
     target_svg_path = os.path.join(pm.model_dir, '%s_%d_%d.svg' % (file_name, num_labels, gt_labels))
+    gid, pid = 0, 0
     for color_id, i in enumerate(unique_labels):
         i_label_list = np.nonzero(labels == i)
 
@@ -649,6 +644,24 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
         if first_svg:
             copyfile(i_label_map_svg, target_svg_path)
             first_svg = False
+            # with open(target_svg_path, 'r') as f:
+            #     target_svg = f.read()
+            # path_start = target_svg.find('<g')
+            # path_end = target_svg.find('</svg>')
+            #
+            # stroke_start = target_svg.rfind('<path') + 5
+            #
+            # insert_pos = target_svg.find('</svg>')
+            #
+            # gid += 1
+            # pid += 1
+            #
+            # new_source_svg = target_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (file_name, gid) + target_svg[                                                                                            path_start + 3:stroke_start] + ' id="%s-s%d"' % (
+            #                  file_name, pid) + target_svg[stroke_start:path_end]
+            # target_svg = target_svg[:path_start] + new_source_svg + target_svg[insert_pos:]
+            #
+            # with open(target_svg_path, 'w') as f:
+            #     f.write(target_svg)
         else:
             with open(target_svg_path, 'r') as f:
                 target_svg = f.read()
@@ -659,8 +672,23 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
             path_start = source_svg.find('<g')
             path_end = source_svg.find('</svg>')
 
+            stroke_start = source_svg.find('<path')
+
             insert_pos = target_svg.find('</svg>')
-            target_svg = target_svg[:insert_pos] + source_svg[path_start:path_end] + target_svg[insert_pos:]
+
+            gid += 1
+            pid += 1
+
+            new_source_svg = ''
+            if stroke_start != -1:
+                stroke_start += 5
+                new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
+                file_name, gid) + source_svg[path_start + 3:stroke_start] + ' id="%s-s%d"' % (
+                                 file_name, pid) + source_svg[stroke_start:path_end]
+            else:
+                new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
+                file_name, gid) + source_svg[path_start + 3:path_end]
+            target_svg = target_svg[:insert_pos] + new_source_svg + target_svg[insert_pos:]
 
             with open(target_svg_path, 'w') as f:
                 f.write(target_svg)

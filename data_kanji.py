@@ -5,12 +5,10 @@ import multiprocessing
 import signal
 import sys
 from datetime import datetime
-import preprocess
+from preprocess import thinning
 
-import tensorflow as tf
-import numpy as np
 import cairosvg
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image
 import io
 import xml.etree.ElementTree as et
 import matplotlib.pyplot as plt
@@ -160,14 +158,11 @@ class BatchManager(object):
         return np.array(x_list), np.array(xs), np.array(ys), file_list
 
     def read_png(self, file_path):
-        img = preprocess.thinning(file_path)
-        img = Image.fromarray(img).convert("RGB")
-        # img = Image.open(file_path).convert("RGB")
-        img = img.resize((64, 64))
-        img = ImageOps.invert(img)
-        # img = img.filter(ImageFilter.MinFilter(3))
+        img = thinning(file_path)
+        # img = Image.fromarray(img).convert('L')
+        # img = ImageOps.invert(img)
         print(np.array(img).shape)
-        s = np.array(img)[:, :, 2].astype(np.float)  # / 255.0
+        s = np.array(img)[:, :].astype(np.float)  # / 255.0
         max_intensity = np.amax(s)
         s = s / max_intensity
         return s, 3, []
@@ -192,7 +187,7 @@ class BatchManager(object):
         svg = svg.format(w=self.width, h=self.height, r=r, sx=s[0], sy=s[1], tx=t[0], ty=t[1])
         img = cairosvg.svg2png(bytestring=svg.encode('utf-8'))
         img = Image.open(io.BytesIO(img))
-        print(np.array(img)[:, :, 3].astype(np.float))
+        img = img.resize((self.width, self.height))
         s = np.array(img)[:, :, 3].astype(np.float)  # / 255.0
         max_intensity = np.amax(s)
         s = s / max_intensity
