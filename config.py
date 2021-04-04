@@ -40,7 +40,7 @@ data_arg.add_argument('--max_stroke_width', type=int, default=2) # 4 for varying
 
 # Training / test parameters
 train_arg = add_argument_group('Training')
-train_arg.add_argument('--is_train', type=str2bool, default=True)
+train_arg.add_argument('--is_train', type=str2bool, default=False)
 train_arg.add_argument('--use_gpu', type=str2bool, default=True)
 train_arg.add_argument('--gpu_id', type=str, default='0')
 train_arg.add_argument('--start_step', type=int, default=0)
@@ -54,7 +54,7 @@ train_arg.add_argument('--beta2', type=float, default=0.999)
 
 # vectorize
 vect_arg = add_argument_group('Vectorize')
-vect_arg.add_argument('--load_pathnet', type=str, default='')
+vect_arg.add_argument('--load_pathnet', type=str, default='vectornet/log/path/kanji_0329_035748_test')
 vect_arg.add_argument('--load_overlapnet', type=str, default='')
 vect_arg.add_argument('--num_test', type=int, default=100)
 vect_arg.add_argument('--max_label', type=int, default=128)

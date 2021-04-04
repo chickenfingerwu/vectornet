@@ -168,7 +168,8 @@ class Trainer(object):
                     "summary": self.summary_op,                    
                 })
 
-            if step % self.test_step == self.test_step-1 or step == self.max_step-1:
+            # if step % self.test_step == self.test_step-1 or step == self.max_step-1:
+            if True:
                 l1, l2, iou, nb = 0, 0, 0, 0
                 for x, y in self.batch_manager.test_batch():
                     if self.data_format == 'NCHW':

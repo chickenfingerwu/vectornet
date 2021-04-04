@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
 
-from models import *
-from utils import save_image
+from vectornet.models import *
+from vectornet.utils import save_image
 
 
 class Param(object):
@@ -145,10 +145,27 @@ class Tester(object):
 
         self.stat()
 
-    def predict(self, file_path):
+    def compute_loss_structure(self, real_images, fake_images, file_names, direction):
+        bs = real_images.shape[0]
+        IoU_acc = []
+        for i in range(bs):
+            real_img = real_images[i]
+            fake_img = fake_images[i]
+            file_name = os.path.splitext(os.path.basename(file_names[i]))[0]
+            real_pm = self.predict(real_img, file_name + '_real_' + direction, False, '')
+            real_pm = vectorize(real_pm, False)
+            fake_pm = self.predict(fake_img, file_name + '_fake_' + direction, True, real_pm.svg_path)
+            fake_pm = vectorize(fake_pm, True)
+            IoU_acc = IoU_acc.append(fake_pm.acc_avg)
+        return np.average(IoU_acc)
+
+
+    def predict(self, img, file_name, has_ground_truth, gt_path):
         # convert svg to raster image
-        img, num_paths, path_list = self.batch_manager.read_svg(file_path)
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
+        img = self.batch_manager.read_png(img)
+        if has_ground_truth:
+            num_paths, path_list = self.batch_manager.read_svg(gt_path)
+        # file_name = os.path.splitext(os.path.basename(file_path))[0]
         input_img_path = os.path.join(self.model_dir, '%s_0_input.png' % file_name)
         save_image((1 - img[np.newaxis, :, :, np.newaxis]) * 255, input_img_path, padding=0)
 
@@ -289,13 +306,14 @@ class Tester(object):
         pm.duration_map = duration
         pm.duration += duration
 
-        pm.num_paths = num_paths
-        pm.path_list = path_list
+        # pm.num_paths = num_paths
+        # pm.path_list = path_list
         pm.path_pixels = path_pixels
         pm.dup_dict = dup_dict
         pm.dup_rev_dict = dup_rev_dict
         pm.img = img
-        pm.file_path = file_path
+        pm.file_name = file_name
+        # pm.file_path = file_path
         pm.model_dir = self.model_dir
         pm.height = self.height
         pm.width = self.width
@@ -401,7 +419,7 @@ class Tester(object):
             f.write('duration total: {}\n'.format(np.average(duration)))
 
 
-def vectorize(pm):
+def vectorize(pm, do_compute_acc):
     start_time = time.time()
     file_path = os.path.basename(pm.file_path)
     file_name = os.path.splitext(file_path)[0]
@@ -416,19 +434,23 @@ def vectorize(pm):
     # labels = label_cc(labels, pm)
 
     # 3. compute accuracy
-    accuracy_list = compute_accuracy(labels, pm)
-
     unique_labels = np.unique(labels)
     num_labels = unique_labels.size
-    acc_avg = np.average(accuracy_list)
+    acc_avg = 0
 
-    print('%s: %s, the number of labels %d, truth %d' % (datetime.now(), file_name, num_labels, pm.num_paths))
-    print('%s: %s, energy before optimization %.4f' % (datetime.now(), file_name, e_before))
-    print('%s: %s, energy after optimization %.4f' % (datetime.now(), file_name, e_after))
-    print('%s: %s, accuracy computed, avg.: %.3f' % (datetime.now(), file_name, acc_avg))
+    has_ground_truth = do_compute_acc
+    if has_ground_truth:
+        accuracy_list = compute_accuracy(labels, pm)
+        acc_avg = np.average(accuracy_list)
+
+        print('%s: %s, the number of labels %d, truth %d' % (datetime.now(), file_name, num_labels, pm.num_paths))
+        print('%s: %s, energy before optimization %.4f' % (datetime.now(), file_name, e_before))
+        print('%s: %s, energy after optimization %.4f' % (datetime.now(), file_name, e_after))
+        print('%s: %s, accuracy computed, avg.: %.3f' % (datetime.now(), file_name, acc_avg))
+    pm.acc_avg = acc_avg
 
     # 4. save image
-    save_label_img(labels, unique_labels, num_labels, 0, pm)
+    pm.svg_path = save_label_img(labels, unique_labels, num_labels, 0, pm)
     duration = time.time() - start_time
     pm.duration_vect = duration
 
@@ -441,7 +463,7 @@ def vectorize(pm):
             file_path, num_labels, pm.num_paths, acc_avg,
             pm.duration_pred, pm.duration_ov, pm.duration_map,
             pm.duration_vect, pm.duration))
-
+    return pm
 
 def label(file_name, pm):
     start_time = time.time()
@@ -572,9 +594,10 @@ def compute_accuracy(labels, pm):
 
         accuracy_list = []
         for j, stroke in enumerate(pm.path_list):
-            intersect = np.sum(np.logical_and(i_label_map, stroke))
-            union = np.sum(np.logical_or(i_label_map, stroke))
-            accuracy = intersect / float(union)
+            accuracy = np.sum(np.logical_xor(i_label_map, stroke)**2)
+            # intersect = np.sum(np.logical_and(i_label_map, stroke))
+            # union = np.sum(np.logical_or(i_label_map, stroke))
+            # accuracy = intersect / float(union)
             # print('compare with %d-th path, intersect: %d, union :%d, accuracy %.2f' %
             #     (j, intersect, union, accuracy))
             accuracy_list.append(accuracy)
@@ -717,3 +740,4 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
     label_map_path = os.path.join(pm.model_dir, '%s_%.2f_%.2f_%d_%d_t.png' % (
         file_name, pm.sigma_neighbor, pm.sigma_predict, num_labels, gt_labels))
     imageio.imwrite(label_map_path, label_map_t)
+    return target_svg_path

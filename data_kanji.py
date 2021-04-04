@@ -5,7 +5,7 @@ import multiprocessing
 import signal
 import sys
 from datetime import datetime
-from preprocess import thinning
+from vectornet.preprocess import thinning
 
 import cairosvg
 from PIL import Image
@@ -13,7 +13,7 @@ import io
 import xml.etree.ElementTree as et
 import matplotlib.pyplot as plt
 
-from ops import *
+from vectornet.ops import *
 
 
 class BatchManager(object):
@@ -165,7 +165,7 @@ class BatchManager(object):
         s = np.array(img)[:, :].astype(np.float)  # / 255.0
         max_intensity = np.amax(s)
         s = s / max_intensity
-        return s, 3, []
+        return s
 
     def read_svg(self, file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -183,14 +183,6 @@ class BatchManager(object):
         #     t = rng.randint(-10, 10, 2)
         #     if s_sign == -1:
         #         t[1] = t[1] - 109
-
-        svg = svg.format(w=self.width, h=self.height, r=r, sx=s[0], sy=s[1], tx=t[0], ty=t[1])
-        img = cairosvg.svg2png(bytestring=svg.encode('utf-8'))
-        img = Image.open(io.BytesIO(img))
-        img = img.resize((self.width, self.height))
-        s = np.array(img)[:, :, 3].astype(np.float)  # / 255.0
-        max_intensity = np.amax(s)
-        s = s / max_intensity
 
         path_list = []
         pid = 0
@@ -213,10 +205,11 @@ class BatchManager(object):
             # leave only one path
             y_png = cairosvg.svg2png(bytestring=svg_one.encode('utf-8'))
             y_img = Image.open(io.BytesIO(y_png))
+            y_img = y_img.resize((self.width, self.height))
             path = (np.array(y_img)[:, :, 3] > 0)
             path_list.append(path)
 
-        return s, num_paths, path_list
+        return num_paths, path_list
 
 
 def preprocess_path(file_path, w, h, rng):
@@ -413,8 +406,8 @@ def main(config):
 
 
 if __name__ == "__main__":
-    from config import get_config
-    from utils import prepare_dirs_and_logger, save_config, save_image
+    from vectornet.config import get_config
+    from vectornet.utils import prepare_dirs_and_logger, save_config, save_image
 
     config, unparsed = get_config()
     setattr(config, 'archi', 'path')  # overlap
