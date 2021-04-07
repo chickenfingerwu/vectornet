@@ -158,14 +158,13 @@ class BatchManager(object):
         return np.array(x_list), np.array(xs), np.array(ys), file_list
 
     def read_png(self, file_path):
-        img = thinning(file_path)
+        img = thinning(file_path, self.width, self.height)
         # img = Image.fromarray(img).convert('L')
         # img = ImageOps.invert(img)
-        print(np.array(img).shape)
         s = np.array(img)[:, :].astype(np.float)  # / 255.0
         max_intensity = np.amax(s)
         s = s / max_intensity
-        return s, 3, []
+        return s
 
     def read_svg(self, file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -185,12 +184,12 @@ class BatchManager(object):
         #         t[1] = t[1] - 109
 
         svg = svg.format(w=self.width, h=self.height, r=r, sx=s[0], sy=s[1], tx=t[0], ty=t[1])
-        img = cairosvg.svg2png(bytestring=svg.encode('utf-8'))
-        img = Image.open(io.BytesIO(img))
-        img = img.resize((self.width, self.height))
-        s = np.array(img)[:, :, 3].astype(np.float)  # / 255.0
-        max_intensity = np.amax(s)
-        s = s / max_intensity
+        # img = cairosvg.svg2png(bytestring=svg.encode('utf-8'))
+        # img = Image.open(io.BytesIO(img))
+        # img = img.resize((self.width, self.height))
+        # s = np.array(img)[:, :, 3].astype(np.float)  # / 255.0
+        # max_intensity = np.amax(s)
+        # s = s / max_intensity
 
         path_list = []
         pid = 0
@@ -213,10 +212,11 @@ class BatchManager(object):
             # leave only one path
             y_png = cairosvg.svg2png(bytestring=svg_one.encode('utf-8'))
             y_img = Image.open(io.BytesIO(y_png))
+            y_img = y_img.resize((self.width, self.height))
             path = (np.array(y_img)[:, :, 3] > 0)
             path_list.append(path)
 
-        return s, num_paths, path_list
+        return num_paths, path_list
 
 
 def preprocess_path(file_path, w, h, rng):

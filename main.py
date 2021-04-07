@@ -33,8 +33,8 @@ def main(config):
                 config.dataset == 'cat':
             from data_qdraw import BatchManager
 
-        batch_manager = BatchManager(config)
-        tester = Tester(config, batch_manager)
+        # batch_manager = BatchManager(config)
+        tester = Tester(config)
         tester.test()
 
 

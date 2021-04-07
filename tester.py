@@ -1,6 +1,11 @@
 from __future__ import print_function
 
+from glob import glob
+from cv2 import cv2
+
 import imageio
+import io
+
 import os
 import multiprocessing
 import time
@@ -8,7 +13,11 @@ from datetime import datetime
 import platform
 from subprocess import call
 from shutil import copyfile
+from preprocess import thinning
+import re
 
+import cairosvg
+from PIL import Image
 import sklearn.neighbors
 import skimage.measure
 
@@ -19,28 +28,87 @@ import matplotlib.cm as cmx
 from models import *
 from utils import save_image
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+
+def vectorize_mp(q, IoU_q):
+    while True:
+        pm = q.get()
+        if pm is None:
+            break
+        pm = vectorize(pm, False, '')
+        IoU_q.put(pm.acc_avg)
+        # print('%s: qsize %d' % (datetime.now(), q.qsize()))
+        q.task_done()
+
+
+def read_png(file_path, img_domain, is_gt):
+    img = thinning(file_path, img_domain, is_gt)
+    # img = Image.fromarray(img).convert('L')
+    # img = ImageOps.invert(img)
+    s = np.array(img)[:, :].astype(np.float)  # / 255.0
+    max_intensity = np.amax(s)
+    s = s / max_intensity
+    return s
+
+
+def read_svg(file_path, width, height):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        svg = f.read()
+
+    r = 0
+    s = [1, 1]
+    t = [0, 0]
+    # if transform:
+    #     r = rng.randint(-45, 45)
+    #     # s_sign = rng.choice([1, -1], 1)[0]
+    #     s_sign = 1
+    #     s = 1.75 * rng.random_sample(2) + 0.25 # [0.25, 2)
+    #     s[1] = s[1] * s_sign
+    #     t = rng.randint(-10, 10, 2)
+    #     if s_sign == -1:
+    #         t[1] = t[1] - 109
+
+    path_list = []
+    pid = 0
+    num_paths = 0
+    while pid != -1:
+        pid = svg.find('path id', pid + 1)
+        num_paths = num_paths + 1
+    num_paths = num_paths - 1  # uncount last one
+
+    for i in range(num_paths):
+        svg_one = svg
+        pid = len(svg_one)
+        for j in range(num_paths):
+            pid = svg_one.rfind('path id', 0, pid)
+            if j != i:
+                id_start = svg_one.rfind('>', 0, pid) + 1
+                id_end = svg_one.find('/>', id_start) + 2
+                svg_one = svg_one[:id_start] + svg_one[id_end:]
+
+        # leave only one path
+        y_png = cairosvg.svg2png(bytestring=svg_one.encode('utf-8'))
+        y_img = Image.open(io.BytesIO(y_png))
+        y_img = y_img.resize((width, height))
+        path = (np.array(y_img)[:, :, 3] > 0)
+        path_list.append(path)
+
+    return num_paths, path_list
+
 
 class Param(object):
     pass
 
 
-def vectorize_mp(q):
-    while True:
-        pm = q.get()
-        if pm is None:
-            break
-
-        vectorize(pm)
-        print('%s: qsize %d' % (datetime.now(), q.qsize()))
-        q.task_done()
-
-
 class Tester(object):
-    def __init__(self, config, batch_manager):
+    def __init__(self, config):
         tf.set_random_seed(config.random_seed)
         self.config = config
-        self.batch_manager = batch_manager
-        self.rng = self.batch_manager.rng
+        # self.batch_manager = batch_manager
+        self.rng = np.random.RandomState(config.random_seed)
+        self.data_paths_A = sorted(glob("{}/trainA/*.{}".format(self.config.data_dir, 'png')))
+        self.data_paths_B = sorted(glob("{}/trainB/*.{}".format(self.config.data_dir, 'png')))
 
         self.b_num = config.test_batch_size
         self.height = config.height
@@ -59,20 +127,20 @@ class Tester(object):
         self.sigma_neighbor = config.sigma_neighbor
         self.sigma_predict = config.sigma_predict
         self.neighbor_sample = config.neighbor_sample
+        self.IoU_list = []
 
         self.num_test = config.num_test
-        self.test_paths = self.batch_manager.test_paths
-        if config.dataset == 'baseball' or config.dataset == 'cat' or \
-                config.dataset == 'multi':
-            self.test_paths = self.batch_manager.vec_paths
-        if self.num_test < len(self.test_paths):
-            self.test_paths = self.rng.choice(self.test_paths, self.num_test, replace=False)
+        # self.test_paths = self.batch_manager.test_paths
+        # if config.dataset == 'baseball' or config.dataset == 'cat' or \
+        #         config.dataset == 'multi':
+        #     self.test_paths = self.batch_manager.vec_paths
+        # if self.num_test < len(self.test_paths):
+        #     self.test_paths = self.rng.choice(self.test_paths, self.num_test, replace=False)
         self.mp = config.mp
         self.num_worker = config.num_worker
 
         self.model_dir = config.model_dir
         self.data_path = config.data_path
-
         self.build_model()
 
     def build_model(self):
@@ -87,7 +155,7 @@ class Tester(object):
 
             self.yp, _ = VDSR(self.xp, self.conv_hidden_num, self.repeat_num,
                               self.data_format, self.use_norm, train=False)
-            show_all_variables()
+            # show_all_variables()
 
             saver = tf.train.Saver()
             ckpt = tf.train.get_checkpoint_state(self.load_pathnet)
@@ -117,38 +185,105 @@ class Tester(object):
 
     def test(self):
         if self.mp:
+            IoU_q = multiprocessing.Queue()
             q = multiprocessing.JoinableQueue()
-            pool = multiprocessing.Pool(self.num_worker, vectorize_mp, (q,))
-        file_path = self.config.file_path
-        param = self.predict(file_path)
-        if self.mp:
-            q.put(param)
-        else:
-            vectorize(param)
+            pool = multiprocessing.Pool(self.num_worker, vectorize_mp, (q, IoU_q))
+        # file_path = self.config.file_path
+        # param = self.predict(file_path)
+        # if self.mp:
+        #     q.put(param)
+        # else:
+        #     vectorize(param)
 
         # preprocess first
-        # for i in range(self.num_test):
-        #     file_path = self.test_paths[i]
-        #     print('\n[{}/{}] start prediction, path: {}'.format(i+1,self.num_test,file_path))
-        #
-        #     param = self.predict(file_path)
-        #
-        #     if self.mp:
-        #         q.put(param)
-        #     else:
-        #         vectorize(param)
-        #
+        num_data_A = len(self.data_paths_A)
+        self.current_data_path = self.config.data_dir + '/trainA'
+        for i in range(num_data_A):
+            file_path = self.data_paths_A[i]
+            file_name = os.path.splitext(os.path.basename(file_path))[0]
+            img = cv2.imread(file_path)
+            print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_A, file_path))
+
+            param = self.predict(img, file_name, 'A', False)
+
+            if self.mp:
+                q.put(param)
+            else:
+                vectorize(param, self.width, self.height)
+
         if self.mp:
             q.join()
             pool.terminate()
             pool.join()
 
-        self.stat()
+        if self.mp:
+            IoU_q = multiprocessing.Queue()
+            q = multiprocessing.JoinableQueue()
+            pool = multiprocessing.Pool(self.num_worker, vectorize_mp, (q, IoU_q))
 
-    def predict(self, file_path):
+        num_data_B = len(self.data_paths_B)
+        self.current_data_path = self.config.data_dir + '/trainB'
+        for i in range(num_data_B):
+            file_path = self.data_paths_B[i]
+            file_name = os.path.splitext(os.path.basename(file_path))[0]
+            img = cv2.imread(file_path)
+            print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_B, file_path))
+
+            param = self.predict(img, file_name, 'B', False)
+
+            if self.mp:
+                q.put(param)
+            else:
+                vectorize(param, self.width, self.height)
+
+        if self.mp:
+            q.join()
+            pool.terminate()
+            pool.join()
+
+        # self.stat()
+
+    # def start_process_for_compute_IoU_loss(self, real_images, fake_images, file_names, direction):
+    #     p = multiprocessing.Process(target=self.compute_loss_structure, args=(real_images, fake_images, file_names, direction,))
+    #     p.start()
+    #     p.join()
+    #     return self.IoU_acc
+
+    def compute_loss_structure(self, real_images, fake_images, file_names, direction, img_domain):
+        if self.mp:
+            q = multiprocessing.JoinableQueue()
+            IoU_q = multiprocessing.Queue()
+            pool = multiprocessing.Pool(self.num_worker, vectorize_mp, (q, IoU_q))
+        bs = real_images.shape[0]
+        IoU_list = []
+        for i in range(bs):
+            real_img = real_images[i]
+            fake_img = fake_images[i]
+            file_name = os.path.splitext(os.path.basename(file_names[i]))[0]
+            if self.mp:
+                real_pm = self.predict(real_img, file_name + '_real_' + img_domain + '_' + direction, img_domain, False)
+                fake_pm = self.predict(fake_img, file_name + '_fake_' + img_domain + '_' + direction, img_domain, True)
+                q.put([real_pm, fake_pm, file_name])
+            else:
+                real_pm = self.predict(real_img, file_name + '_real_' + img_domain + '_' + direction, img_domain, False)
+                fake_pm = self.predict(fake_img, file_name + '_fake_' + img_domain + '_' + direction, img_domain, True)
+                real_pm = vectorize(real_pm, False, '')
+                fake_pm = vectorize(fake_pm, True, real_pm.svg_path)
+                IoU_list.append(fake_pm.acc_avg)
+        if self.mp:
+            q.join()
+            pool.terminate()
+            pool.join()
+            while not IoU_q.empty():
+                IoU_list.append(IoU_q.get())
+        print('all acc: ', IoU_list)
+        self.IoU_acc = np.average(IoU_list)
+        return self.IoU_acc
+
+    def predict(self, img, file_name, img_domain, has_ground_truth):
         # convert svg to raster image
-        img, num_paths, path_list = self.batch_manager.read_svg(file_path)
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
+        img = read_png(img, img_domain, not has_ground_truth)
+        # file_name = os.path.splitext(os.path.basename(file_path))[0]
         input_img_path = os.path.join(self.model_dir, '%s_0_input.png' % file_name)
         save_image((1 - img[np.newaxis, :, :, np.newaxis]) * 255, input_img_path, padding=0)
 
@@ -173,7 +308,7 @@ class Tester(object):
 
         duration = time.time() - start_time
         print('%s: %s, predict paths (#pixels:%d) through pathnet (%.3f sec)' % (
-        datetime.now(), file_name, num_path_pixels, duration))
+            datetime.now(), file_name, num_path_pixels, duration))
         pm.duration_pred = duration
         pm.duration = duration
 
@@ -206,7 +341,7 @@ class Tester(object):
 
             duration = time.time() - start_time
             print('%s: %s, predict overlap (#:%d) through ovnet (%.3f sec)' % (
-            datetime.now(), file_name, dup_id - num_path_pixels, duration))
+                datetime.now(), file_name, dup_id - num_path_pixels, duration))
             pm.duration_ov = duration
             pm.duration += duration
         else:
@@ -285,23 +420,25 @@ class Tester(object):
 
         f.close()
         duration = time.time() - start_time
-        print('%s: %s, prediction computed (%.3f sec)' % (datetime.now(), file_name, duration))
+        # print('%s: %s, prediction computed (%.3f sec)' % (datetime.now(), file_name, duration))
         pm.duration_map = duration
         pm.duration += duration
 
-        pm.num_paths = num_paths
-        pm.path_list = path_list
         pm.path_pixels = path_pixels
         pm.dup_dict = dup_dict
         pm.dup_rev_dict = dup_rev_dict
         pm.img = img
-        pm.file_path = file_path
+        pm.file_name = file_name
+        # pm.file_path = file_path
         pm.model_dir = self.model_dir
         pm.height = self.height
         pm.width = self.width
         pm.max_label = self.max_label
         pm.sigma_neighbor = self.sigma_neighbor
         pm.sigma_predict = self.sigma_predict
+        pm.is_gt = has_ground_truth
+
+        pm.data_path = self.current_data_path
 
         return pm
 
@@ -401,10 +538,16 @@ class Tester(object):
             f.write('duration total: {}\n'.format(np.average(duration)))
 
 
-def vectorize(pm):
+def vectorize(pm, do_compute_acc, gt_path):
     start_time = time.time()
-    file_path = os.path.basename(pm.file_path)
-    file_name = os.path.splitext(file_path)[0]
+    # file_path = os.path.basename(pm.file_path)
+    file_name = pm.file_name
+
+    num_paths, path_list = 0, []
+    if do_compute_acc:
+        num_paths, path_list = read_svg(gt_path, pm.width, pm.height)
+    pm.num_paths = num_paths
+    pm.path_list = path_list
 
     # 1. label
     labels, e_before, e_after = label(file_name, pm)
@@ -416,31 +559,37 @@ def vectorize(pm):
     # labels = label_cc(labels, pm)
 
     # 3. compute accuracy
-    accuracy_list = compute_accuracy(labels, pm)
-
     unique_labels = np.unique(labels)
     num_labels = unique_labels.size
-    acc_avg = np.average(accuracy_list)
+    acc_avg = 0
 
-    print('%s: %s, the number of labels %d, truth %d' % (datetime.now(), file_name, num_labels, pm.num_paths))
-    print('%s: %s, energy before optimization %.4f' % (datetime.now(), file_name, e_before))
-    print('%s: %s, energy after optimization %.4f' % (datetime.now(), file_name, e_after))
-    print('%s: %s, accuracy computed, avg.: %.3f' % (datetime.now(), file_name, acc_avg))
+    has_ground_truth = do_compute_acc
+    if has_ground_truth:
+        accuracy_list = compute_accuracy(labels, pm)
+        acc_avg = np.average(accuracy_list)
+
+        # print('%s: %s, the number of labels %d, truth %d' % (datetime.now(), file_name, num_labels, pm.num_paths))
+        # print('%s: %s, energy before optimization %.4f' % (datetime.now(), file_name, e_before))
+        # print('%s: %s, energy after optimization %.4f' % (datetime.now(), file_name, e_after))
+        # print('%s: %s, accuracy computed, avg.: %.3f' % (datetime.now(), file_name, acc_avg))
+    pm.acc_avg = acc_avg
 
     # 4. save image
-    save_label_img(labels, unique_labels, num_labels, 0, pm)
-    duration = time.time() - start_time
-    pm.duration_vect = duration
+    if not has_ground_truth:
+        pm.svg_path = save_label_img(labels, unique_labels, num_labels, 0, pm)
+        duration = time.time() - start_time
+        pm.duration_vect = duration
+        pm.duration += duration
 
-    # write result
-    pm.duration += duration
-    print('%s: %s, done (%.3f sec)' % (datetime.now(), file_name, pm.duration))
-    stat_file_path = os.path.join(pm.model_dir, file_name + '_stat.txt')
-    with open(stat_file_path, 'w') as f:
-        f.write('%s %d %d %.3f %.3f %.3f %.3f %.3f %.3f\n' % (
-            file_path, num_labels, pm.num_paths, acc_avg,
-            pm.duration_pred, pm.duration_ov, pm.duration_map,
-            pm.duration_vect, pm.duration))
+    ## write result
+    # print('%s: %s, done (%.3f sec)' % (datetime.now(), file_name, pm.duration))
+    # stat_file_path = os.path.join(pm.model_dir, file_name + '_stat.txt')
+    # with open(stat_file_path, 'w') as f:
+    #     f.write('%s %d %d %.3f %.3f %.3f %.3f %.3f %.3f\n' % (
+    #         file_path, num_labels, pm.num_paths, acc_avg,
+    #         pm.duration_pred, pm.duration_ov, pm.duration_map,
+    #         pm.duration_vect, pm.duration))
+    return pm
 
 
 def label(file_name, pm):
@@ -572,6 +721,7 @@ def compute_accuracy(labels, pm):
 
         accuracy_list = []
         for j, stroke in enumerate(pm.path_list):
+            # accuracy = np.sum(np.logical_xor(i_label_map, stroke) ** 2)
             intersect = np.sum(np.logical_and(i_label_map, stroke))
             union = np.sum(np.logical_or(i_label_map, stroke))
             accuracy = intersect / float(union)
@@ -594,10 +744,12 @@ def compute_accuracy(labels, pm):
 def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
     sys_name = platform.system()
 
-    file_path = os.path.basename(pm.file_path)
-    file_name = os.path.splitext(file_path)[0]
+    # file_path = os.path.basename(pm.file_path)
+    file_name = pm.file_name
     num_path_pixels = len(pm.path_pixels[0])
-    gt_labels = pm.num_paths
+    gt_labels = 0
+    if pm.is_gt:
+        gt_labels = pm.num_paths
 
     cmap = plt.get_cmap('jet')
     cnorm = colors.Normalize(vmin=0, vmax=num_labels - 1)
@@ -606,7 +758,7 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
     label_map = np.ones([pm.height, pm.width, 3], dtype=np.float)
     label_map_t = np.ones([pm.height, pm.width, 3], dtype=np.float)
     first_svg = True
-    target_svg_path = os.path.join(pm.model_dir, '%s_%d_%d.svg' % (file_name, num_labels, gt_labels))
+    target_svg_path = os.path.join(pm.data_path + '/svg/', '%s_gr_truth.svg' % (file_name))
     gid, pid = 0, 0
     for color_id, i in enumerate(unique_labels):
         i_label_list = np.nonzero(labels == i)
@@ -617,17 +769,18 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
                 i_label_list[0][j] = pm.dup_rev_dict[i_label]
 
         color = np.asarray(cscalarmap.to_rgba(color_id))
-        label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = color[:3]
+        label_map[pm.path_pixels[0][i_label_list], pm.path_pixels[1][i_label_list]] = color[:3]
 
         # save i label map
         i_label_map = np.zeros([pm.height, pm.width], dtype=np.float)
-        i_label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = pm.img[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]]
+        i_label_map[pm.path_pixels[0][i_label_list], pm.path_pixels[1][i_label_list]] = pm.img[
+            pm.path_pixels[0][i_label_list], pm.path_pixels[1][i_label_list]]
         _, num_cc = skimage.measure.label(i_label_map, background=0, return_num=True)
         i_label_map_path = os.path.join(pm.model_dir, 'tmp', 'i_%s_%d_%d.bmp' % (file_name, i, num_cc))
         imageio.imwrite(i_label_map_path, i_label_map)
 
         i_label_map = np.ones([pm.height, pm.width, 3], dtype=np.float)
-        i_label_map[pm.path_pixels[0][i_label_list],pm.path_pixels[1][i_label_list]] = color[:3]
+        i_label_map[pm.path_pixels[0][i_label_list], pm.path_pixels[1][i_label_list]] = color[:3]
         label_map_t += i_label_map
 
         # vectorize using potrace
@@ -636,32 +789,64 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
 
         if sys_name == 'Windows':
             potrace_path = os.path.join('potrace', 'potrace.exe')
-            call([potrace_path, '-s', '-i', '-C'+color_hex, i_label_map_path])
+            call([potrace_path, '-s', '-i', '-C' + color_hex, i_label_map_path])
         else:
-            call(['potrace', '-s', '-i', '-C'+color_hex, i_label_map_path])
+            call(['potrace', '-s', '-i', '-C' + color_hex, i_label_map_path])
 
         i_label_map_svg = os.path.join(pm.model_dir, 'tmp', 'i_%s_%d_%d.svg' % (file_name, i, num_cc))
         if first_svg:
             copyfile(i_label_map_svg, target_svg_path)
             first_svg = False
-            # with open(target_svg_path, 'r') as f:
-            #     target_svg = f.read()
-            # path_start = target_svg.find('<g')
-            # path_end = target_svg.find('</svg>')
-            #
-            # stroke_start = target_svg.rfind('<path') + 5
-            #
-            # insert_pos = target_svg.find('</svg>')
-            #
-            # gid += 1
-            # pid += 1
-            #
-            # new_source_svg = target_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (file_name, gid) + target_svg[                                                                                            path_start + 3:stroke_start] + ' id="%s-s%d"' % (
-            #                  file_name, pid) + target_svg[stroke_start:path_end]
-            # target_svg = target_svg[:path_start] + new_source_svg + target_svg[insert_pos:]
-            #
-            # with open(target_svg_path, 'w') as f:
-            #     f.write(target_svg)
+            with open(target_svg_path, 'r') as f:
+                target_svg = f.read()
+
+            source_svg = target_svg
+
+            path_start = target_svg.find('<g')
+            path_end = target_svg.find('</svg>')
+
+            insert_pos = target_svg.find('</svg>')
+            stroke_indexes = [m.start() for m in re.finditer('<path', source_svg)]
+            new_source_svg = ''
+
+            if len(stroke_indexes) == 1:
+                gid += 1
+                pid += 1
+                stroke_start = stroke_indexes[0] + 5
+                new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
+                    file_name, gid) + source_svg[path_start + 3:stroke_start] + ' id="%s-s%d" ' % (
+                                     file_name, pid) + source_svg[stroke_start + 1:path_end]
+                target_svg = target_svg[:path_start] + new_source_svg + target_svg[insert_pos:]
+
+                with open(target_svg_path, 'w') as f:
+                    f.write(target_svg)
+
+            elif len(stroke_indexes) > 1:
+                gid += 1
+                new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
+                    file_name, gid) + source_svg[path_start + 3:stroke_indexes[0] + 5]
+                for i_s in range(0, len(stroke_indexes)):
+                    pid += 1
+                    stroke_start = stroke_indexes[i_s]
+                    stroke_start += 5
+                    if i_s < len(stroke_indexes) - 1:
+                        next_stroke_start = stroke_indexes[i_s + 1] + 5
+                    else:
+                        next_stroke_start = path_end
+                    new_source_svg = new_source_svg + ' id="%s-s%d" ' % (
+                        file_name, pid) + source_svg[stroke_start:next_stroke_start]
+
+                target_svg = target_svg[:path_start] + new_source_svg + target_svg[insert_pos:]
+
+                with open(target_svg_path, 'w') as f:
+                    f.write(target_svg)
+            elif len(stroke_indexes) == 0:
+                gid += 1
+                new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
+                    file_name, gid) + source_svg[path_start + 3:path_end]
+                target_svg = target_svg[:path_start] + new_source_svg + target_svg[insert_pos:]
+                with open(target_svg_path, 'w') as f:
+                    f.write(target_svg)
         else:
             with open(target_svg_path, 'r') as f:
                 target_svg = f.read()
@@ -671,23 +856,34 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
 
             path_start = source_svg.find('<g')
             path_end = source_svg.find('</svg>')
-
-            stroke_start = source_svg.find('<path')
-
-            insert_pos = target_svg.find('</svg>')
-
-            gid += 1
-            pid += 1
-
             new_source_svg = ''
-            if stroke_start != -1:
-                stroke_start += 5
+            stroke_indexes = [m.start() for m in re.finditer('<path', source_svg)]
+            insert_pos = target_svg.find('</svg>')
+            if len(stroke_indexes) == 1:
+                gid += 1
+                pid += 1
+                stroke_start = stroke_indexes[0] + 5
                 new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
-                file_name, gid) + source_svg[path_start + 3:stroke_start] + ' id="%s-s%d"' % (
-                                 file_name, pid) + source_svg[stroke_start:path_end]
-            else:
+                    file_name, gid) + source_svg[path_start + 3:stroke_start] + ' id="%s-s%d" ' % (
+                                     file_name, pid) + source_svg[stroke_start + 1:path_end]
+            elif len(stroke_indexes) > 1:
+                gid += 1
                 new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
-                file_name, gid) + source_svg[path_start + 3:path_end]
+                    file_name, gid) + source_svg[path_start + 3:stroke_indexes[0] + 5]
+                for i_s in range(0, len(stroke_indexes)):
+                    pid += 1
+                    stroke_start = stroke_indexes[i_s]
+                    stroke_start += 5
+                    if i_s < len(stroke_indexes) - 1:
+                        next_stroke_start = stroke_indexes[i_s + 1] + 5
+                    else:
+                        next_stroke_start = path_end
+                    new_source_svg = new_source_svg + ' id="%s-s%d" ' % (
+                        file_name, pid) + source_svg[stroke_start:next_stroke_start]
+            elif len(stroke_indexes) == 0:
+                gid += 1
+                new_source_svg = source_svg[path_start:path_start + 2] + ' id="%s-g%d" ' % (
+                    file_name, gid) + source_svg[path_start + 3:path_end]
             target_svg = target_svg[:insert_pos] + new_source_svg + target_svg[insert_pos:]
 
             with open(target_svg_path, 'w') as f:
@@ -709,11 +905,11 @@ def save_label_img(labels, unique_labels, num_labels, acc_avg, pm):
     with open(target_svg_path, 'w') as f:
         f.write(target_svg)
 
-    label_map_path = os.path.join(pm.model_dir, '%s_%.2f_%.2f_%d_%d.png' % (
-        file_name, pm.sigma_neighbor, pm.sigma_predict, num_labels, gt_labels))
+    label_map_path = os.path.join(pm.data_path + '/svg/', '%s_vectorized.png' % (file_name))
     imageio.imwrite(label_map_path, label_map)
 
-    label_map_t /= np.amax(label_map_t)
-    label_map_path = os.path.join(pm.model_dir, '%s_%.2f_%.2f_%d_%d_t.png' % (
-        file_name, pm.sigma_neighbor, pm.sigma_predict, num_labels, gt_labels))
-    imageio.imwrite(label_map_path, label_map_t)
+    # label_map_t /= np.amax(label_map_t)
+    # label_map_path = os.path.join(pm.data_path + '/svg/', '%s_%.2f_%.2f_%d_%d_t.png' % (
+    #     file_name, pm.sigma_neighbor, pm.sigma_predict, num_labels, gt_labels))
+    # imageio.imwrite(label_map_path, label_map_t)
+    return target_svg_path
