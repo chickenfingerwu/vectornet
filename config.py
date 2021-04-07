@@ -31,7 +31,7 @@ net_arg.add_argument('--archi', type=str, default='path',
 
 # Data
 data_arg = add_argument_group('Data')
-data_arg.add_argument('--data_dir', type=str, default='../gdrive/My Drive/ETL_Test')
+data_arg.add_argument('--data_dir', type=str, default='../gdrive/MyDrive/ETL_Test')
 data_arg.add_argument('--dataset', type=str, default='kanji',
                       choices=['line', 'ch', 'kanji', 'baseball', 'cat'])
 data_arg.add_argument('--batch_size', type=int, default=8)
