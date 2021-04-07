@@ -34,7 +34,7 @@ def thinning(img, img_domain, is_gt):
 
     return img
 
-img = cv2.imread('047584.png')
-img = 255 - thinning(img, 'A', True)
-cv2.imshow('sth', img)
-cv2.waitKey(0)
+# img = cv2.imread('047584.png')
+# img = 255 - thinning(img, 'A', True)
+# cv2.imshow('sth', img)
+# cv2.waitKey(0)
