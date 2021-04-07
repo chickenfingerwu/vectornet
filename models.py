@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from vectornet.ops import *
+from ops import *
 slim = tf.contrib.slim
 
 def VDSR(x, hidden_num, repeat_num, data_format, use_norm, name='VDSR',
