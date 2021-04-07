@@ -22,9 +22,13 @@ def thinning(img, img_domain, is_gt):
     #     img = 255 - img
     if is_gt and img_domain == 'A':
         img = 255 - img
-        kernel = np.ones(3, dtype='uint8')
-        img = cv2.erode(img, kernel, iterations=1)
-        img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel, iterations=1)
+        percent_h = (256 / height) * 100
+        percent_w = (256 / width) * 100
+        img = cv2.resize(img, (256, 256), fx=percent_w, fy=percent_h)
+        # kernel = np.ones(5, dtype='uint8')
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
+        img = cv2.erode(img, kernel, iterations=3)
+        # img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel, iterations=1)
     img = cv2.resize(img, (64, 64), fx=scale_percent_w, fy=scale_percent_h)
     if not is_gt:
         cv2.imwrite("current_fake_result_2_%s_resize.png" % img_domain, img)
@@ -33,8 +37,3 @@ def thinning(img, img_domain, is_gt):
     # img = cv2.ximgproc.thinning(img)
 
     return img
-
-# img = cv2.imread('047584.png')
-# img = 255 - thinning(img, 'A', True)
-# cv2.imshow('sth', img)
-# cv2.waitKey(0)
