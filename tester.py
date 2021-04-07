@@ -201,15 +201,16 @@ class Tester(object):
         for i in range(num_data_A):
             file_path = self.data_paths_A[i]
             file_name = os.path.splitext(os.path.basename(file_path))[0]
-            img = cv2.imread(file_path)
-            print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_A, file_path))
+            if not os.path.isfile(os.path.join(self.current_data_path + '/svg/', '%s_gr_truth.svg' % (file_name))):
+                img = cv2.imread(file_path)
+                print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_A, file_path))
 
-            param = self.predict(img, file_name, 'A', False)
+                param = self.predict(img, file_name, 'A', False)
 
-            if self.mp:
-                q.put(param)
-            else:
-                vectorize(param, self.width, self.height)
+                if self.mp:
+                    q.put(param)
+                else:
+                    vectorize(param, self.width, self.height)
 
         if self.mp:
             q.join()
@@ -226,15 +227,16 @@ class Tester(object):
         for i in range(num_data_B):
             file_path = self.data_paths_B[i]
             file_name = os.path.splitext(os.path.basename(file_path))[0]
-            img = cv2.imread(file_path)
-            print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_B, file_path))
+            if not os.path.isfile(os.path.join(self.current_data_path + '/svg/', '%s_gr_truth.svg' % (file_name))):
+                img = cv2.imread(file_path)
+                print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_A, file_path))
 
-            param = self.predict(img, file_name, 'B', False)
+                param = self.predict(img, file_name, 'B', False)
 
-            if self.mp:
-                q.put(param)
-            else:
-                vectorize(param, self.width, self.height)
+                if self.mp:
+                    q.put(param)
+                else:
+                    vectorize(param, self.width, self.height)
 
         if self.mp:
             q.join()
