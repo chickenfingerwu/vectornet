@@ -232,7 +232,7 @@ class Tester(object):
             file_name = os.path.splitext(os.path.basename(file_path))[0]
             if not os.path.isfile(os.path.join(self.current_data_path + '/svg/', '%s_gr_truth.svg' % (file_name))):
                 img = cv2.imread(file_path)
-                print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_A, file_path))
+                print('\n[{}/{}] start prediction, path: {}'.format(i + 1, num_data_B, file_path))
 
                 param = self.predict(img, file_name, 'B', False)
 
