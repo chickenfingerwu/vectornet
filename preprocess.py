@@ -27,8 +27,10 @@ def thinning(img, img_domain, is_gt):
         img = cv2.resize(img, (256, 256), fx=percent_w, fy=percent_h)
         # kernel = np.ones(5, dtype='uint8')
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
-        img = cv2.erode(img, kernel, iterations=3)
-        # img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5,5))
+
+        # img = cv2.dilate(img, rect_kernel, iterations=2)
+        img = cv2.erode(img, kernel, iterations=2)
     img = cv2.resize(img, (64, 64), fx=scale_percent_w, fy=scale_percent_h)
     if not is_gt:
         cv2.imwrite("current_fake_result_2_%s_resize.png" % img_domain, img)

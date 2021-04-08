@@ -184,18 +184,21 @@ class Tester(object):
                 print('%s: Pre-trained model restored from %s' % (datetime.now(), self.load_overlapnet))
 
     def test(self):
+        # file_path = self.config.file_path
+        # file_path = '047584.png'
+        # img = cv2.imread(file_path)
+        # # file_name = os.path.splitext(os.path.basename(file_path))[0]
+        # self.current_data_path = self.config.data_dir
+        # param = self.predict(img, '047584', 'A', False)
+        # vectorize(param, False, '')
+
+        # preprocess first
         if self.mp:
             IoU_q = multiprocessing.Queue()
             q = multiprocessing.JoinableQueue()
             pool = multiprocessing.Pool(self.num_worker, vectorize_mp, (q, IoU_q))
-        # file_path = self.config.file_path
-        # param = self.predict(file_path)
-        # if self.mp:
-        #     q.put(param)
-        # else:
-        #     vectorize(param)
 
-        # preprocess first
+
         num_data_A = len(self.data_paths_A)
         self.current_data_path = self.config.data_dir + '/trainA'
         for i in range(num_data_A):
